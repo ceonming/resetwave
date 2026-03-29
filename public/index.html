@@ -1147,9 +1147,20 @@
       dismissBtn.addEventListener('click', () => banner.classList.remove('show'));
 
       // ── iOS audio unlock keepalive ─────────────────────────
-      // Prevents iOS from suspending AudioContext when screen locks
-      document.addEventListener('visibilitychange', () => {
-        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      // Prevents iOS from suspending Web Audio when app backgrounds
+      const keepAudioAlive = () => {
+        if (audioCtx && audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
+      };
+
+      document.addEventListener('visibilitychange', keepAudioAlive);
+      document.addEventListener('pagehide', keepAudioAlive);
+      document.addEventListener('blur', keepAudioAlive);
+      document.addEventListener('focus', () => {
+        if (audioCtx && audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
       });
 
     })();
