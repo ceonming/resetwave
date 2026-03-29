@@ -1,886 +1,1169 @@
 <!DOCTYPE html>
-
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#04080f">
-    <meta name="description"
-        content="Binaural beats for brain reset. Delta, Theta, Alpha & Gamma waves. Use headphones.">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="ResetWave">
-    <link rel="manifest" href="/manifest.json">
-    <link rel="apple-touch-icon" href="/icon-192.png">
-    <title>ResetWave — Neural Reset Through Sound</title>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@100;300&family=Cormorant+Garamond:ital,wght@0,300;1,300&display=swap');
-
-        *,
-        *::before,
-        *::after {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.13/html-to-image.min.js"
+    integrity="sha512-iZ2ORl595Wx6miw+GuadDet4WQbdSWS3JLMoNfY8cRGoEFy6oT3G9IbcrBeL6AfkgpA51ETt/faX6yLV+/gFJg=="
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script>
+    (function () {
+      const originalConsole = window.console;
+      window.console = {
+        log: (...args) => {
+          originalConsole.log(...args);
+          window.parent.postMessage({ type: 'console', message: args.join(' ') }, '*');
+        },
+        error: (...args) => {
+          originalConsole.error(...args);
+          window.parent.postMessage({ type: 'console', message: 'Error: ' + args.join(' ') }, '*');
+        },
+        warn: (...args) => {
+          originalConsole.warn(...args);
+          window.parent.postMessage({ type: 'console', message: 'Warning: ' + args.join(' ') }, '*');
         }
+      };
 
-        :root {
-            –bg: #04080f;
-            –teal: #00d4c8;
-            –blue: #0099ff;
-            –glow: #00f5ff;
-            –text: #a8ccd8;
-            –white: #e8f4f8;
+      let requestId = 0;
+      let callbacksMap = new Map();
+      let streamControllers = new Map();
+
+      window.claude = {
+        complete: (prompt) => {
+          return new Promise((resolve, reject) => {
+            const id = requestId++;
+            callbacksMap.set(id, { resolve, reject });
+            window.parent.postMessage({ type: 'claudeComplete', id, prompt }, '*');
+          });
         }
+      };
 
-        html,
-        body {
-            height: 100%;
+      window.storage = {
+        get: (key, shared = false) => {
+          return new Promise((resolve, reject) => {
+            const id = requestId++;
+            callbacksMap.set(id, { resolve, reject });
+            window.parent.postMessage({ type: 'storageGet', id, key, shared }, '*');
+          });
+        },
+        set: (key, value, shared = false) => {
+          return new Promise((resolve, reject) => {
+            const id = requestId++;
+            callbacksMap.set(id, { resolve, reject });
+            window.parent.postMessage({ type: 'storageSet', id, key, value, shared }, '*');
+          });
+        },
+        delete: (key, shared = false) => {
+          return new Promise((resolve, reject) => {
+            const id = requestId++;
+            callbacksMap.set(id, { resolve, reject });
+            window.parent.postMessage({ type: 'storageDelete', id, key, shared }, '*');
+          });
+        },
+        list: (prefix, shared = false) => {
+          return new Promise((resolve, reject) => {
+            const id = requestId++;
+            callbacksMap.set(id, { resolve, reject });
+            window.parent.postMessage({ type: 'storageList', id, prefix, shared }, '*');
+          });
         }
+      };
 
-        body {
-            background: var(–bg);
-            color: var(–text);
-            font-family: 'Josefin Sans', sans-serif;
-            min-height: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            position: relative;
-        }
+      let pendingBlobs = new Map();
+      URL.createObjectURL = (blob) => {
+        // Store the blob and create an ID and URL for it
+        const blobId = `blob-${Date.now()}-${Math.random()}`;
+        pendingBlobs.set(blobId, blob);
+        return `blob-request://${blobId}`;
+      };
 
-        body::before {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background:
-                radial-gradient(ellipse 80% 50% at 50% 60%, rgba(0, 153, 255, 0.06) 0%, transparent 70%),
-                radial-gradient(ellipse 40% 30% at 30% 30%, rgba(0, 212, 200, 0.04) 0%, transparent 60%),
-                radial-gradient(ellipse 50% 40% at 70% 70%, rgba(0, 80, 120, 0.05) 0%, transparent 60%);
-            pointer-events: none;
-        }
+      URL.revokeObjectURL = (url) => {
+        // Remove the blob from our store
+        const blobId = url.replace("blob-request://", "");
+        pendingBlobs.delete(blobId);
+      };
 
-        body::after {
-            content: '';
-            position: fixed;
-            inset: -50%;
-            width: 200%;
-            height: 200%;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity=' 1'/%3E%3C/svg%3E");
- opacity: 0.025;
-            pointer-events: none;
-            animation: grain 8s steps(10) infinite;
-        }
+      const getBlobFromURL = (url) => {
+        const blobId = url.replace("blob-request://", "");
+        return pendingBlobs.get(blobId);
+      };
 
-        @keyframes grain {
+      // Override global fetch with streaming support
+      window.fetch = (url, init = {}) => {
+        return new Promise((resolve, reject) => {
+          const id = requestId++;
+          const channelId = `fetch-${id}-${Date.now()}`;
 
-            0%,
-            100% {
-                transform: translate(0, 0)
+          callbacksMap.set(id, {
+            resolve: (response) => {
+              // Create a ReadableStream for the response body
+              const stream = new ReadableStream({
+                start(controller) {
+                  streamControllers.set(channelId, controller);
+                },
+                cancel() {
+                  streamControllers.delete(channelId);
+                }
+              });
+
+              // Create and return the Response with the stream
+              resolve(new Response(stream, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers
+              }));
+            },
+            reject,
+            channelId
+          });
+
+          window.parent.postMessage({
+            type: 'proxyFetch',
+            id,
+            url,
+            init,
+            channelId
+          }, '*');
+        });
+      };
+
+      window.addEventListener('message', async (event) => {
+        if (event.data.type === 'takeScreenshot') {
+          const rootElement = document.getElementById('artifacts-component-root-html');
+          if (!rootElement) {
+            window.parent.postMessage({
+              type: 'screenshotError',
+              error: new Error('Root element not found'),
+            }, '*');
+          }
+          const screenshot = await htmlToImage.toPng(rootElement, {
+            imagePlaceholder:
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAA1JREFUGFdjePDgwX8ACOQDoNsk0PMAAAAASUVORK5CYII=",
+          });
+          window.parent.postMessage({
+            type: 'screenshotData',
+            data: screenshot,
+          }, '*');
+        } else if (event.data.type === 'claudeComplete') {
+          const callback = callbacksMap.get(event.data.id);
+          if (event.data.error) {
+            callback.reject(new Error(event.data.error));
+          } else {
+            callback.resolve(event.data.completion);
+          }
+          callbacksMap.delete(event.data.id);
+        } else if (event.data.type === 'proxyFetchResponse') {
+          const callback = callbacksMap.get(event.data.id);
+          if (event.data.error) {
+            callback.reject(new Error(event.data.error));
+            callbacksMap.delete(event.data.id);
+          } else {
+            // Initial response with headers, status, etc.
+            callback.resolve({
+              status: event.data.status,
+              statusText: event.data.statusText,
+              headers: event.data.headers
+            });
+            // Don't delete the callback yet if streaming
+            if (!event.data.body) {
+              callbacksMap.delete(event.data.id);
             }
-
-            10% {
-                transform: translate(-2%, -3%)
+          }
+        } else if (event.data.type === 'proxyFetchStream') {
+          // Handle streaming data chunks
+          const controller = streamControllers.get(event.data.channelId);
+          if (controller) {
+            if (event.data.error) {
+              controller.error(new Error(event.data.error));
+              streamControllers.delete(event.data.channelId);
+            } else if (event.data.done) {
+              controller.close();
+              streamControllers.delete(event.data.channelId);
+              // Clean up the callback
+              const callback = Array.from(callbacksMap.entries()).find(
+                ([_, value]) => value.channelId === event.data.channelId
+              );
+              if (callback) {
+                callbacksMap.delete(callback[0]);
+              }
+            } else if (event.data.chunk) {
+              controller.enqueue(new Uint8Array(event.data.chunk));
             }
-
-            20% {
-                transform: translate(3%, 1%)
-            }
-
-            30% {
-                transform: translate(-1%, 4%)
-            }
-
-            40% {
-                transform: translate(4%, -2%)
-            }
-
-            50% {
-                transform: translate(-3%, 2%)
-            }
-
-            60% {
-                transform: translate(2%, -4%)
-            }
-
-            70% {
-                transform: translate(-4%, 3%)
-            }
-
-            80% {
-                transform: translate(1%, -1%)
-            }
-
-            90% {
-                transform: translate(3%, 4%)
-            }
+          }
+        } else if (event.data.type === 'storageGet') {
+          const callback = callbacksMap.get(event.data.id);
+          if (event.data.error) {
+            callback.reject(new Error(event.data.error));
+          } else {
+            callback.resolve(event.data.result);
+          }
+          callbacksMap.delete(event.data.id);
+        } else if (event.data.type === 'storageSet') {
+          const callback = callbacksMap.get(event.data.id);
+          if (event.data.error) {
+            callback.reject(new Error(event.data.error));
+          } else {
+            callback.resolve(event.data.result);
+          }
+          callbacksMap.delete(event.data.id);
+        } else if (event.data.type === 'storageDelete') {
+          const callback = callbacksMap.get(event.data.id);
+          if (event.data.error) {
+            callback.reject(new Error(event.data.error));
+          } else {
+            callback.resolve(event.data.result);
+          }
+          callbacksMap.delete(event.data.id);
+        } else if (event.data.type === 'storageList') {
+          const callback = callbacksMap.get(event.data.id);
+          if (event.data.error) {
+            callback.reject(new Error(event.data.error));
+          } else {
+            callback.resolve(event.data.result);
+          }
+          callbacksMap.delete(event.data.id);
         }
+      });
 
-        .container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 40px;
-            z-index: 1;
-            width: 100%;
-            max-width: 700px;
-            padding: 40px 24px;
+      window.addEventListener('click', (event) => {
+        const isEl = event.target instanceof HTMLElement;
+        if (!isEl) return;
+
+        // find ancestor links
+        const linkEl = event.target.closest("a");
+        if (!linkEl || !linkEl.href) return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        if (linkEl.href.startsWith("blob-request:")) {
+          const blob = getBlobFromURL(linkEl.href);
+          if (!blob) return;
+          void blob.arrayBuffer().then((data) => {
+            window.parent.postMessage({
+              type: "downloadFile",
+              filename: linkEl.download,
+              data,
+              mimeType: blob.type || "application/octet-stream",
+            });
+          });
+        } else if (linkEl.href.startsWith("data:")) {
+          const [header, base64Data] = linkEl.href.split(",");
+          const mimeMatch = header.match(/data:([^;]+)/);
+          const mimeType = mimeMatch ? mimeMatch[1] : "application/octet-stream";
+          const binaryString = atob(base64Data);
+          const data = Uint8Array.from(binaryString, (c) =>
+            c.charCodeAt(0),
+          ).buffer;
+          window.parent.postMessage({
+            type: "downloadFile",
+            filename: linkEl.download,
+            data,
+            mimeType,
+          });
+        } else {
+          let linkUrl;
+          try {
+            linkUrl = new URL(linkEl.href);
+          } catch (error) {
+            return;
+          }
+
+          if (linkUrl.hostname === window.location.hostname) return;
+
+          window.parent.postMessage({
+            type: 'openExternal',
+            href: linkEl.href,
+          }, '*');
         }
+      });
 
-        .header {
-            text-align: center;
-        }
+      const originalOpen = window.open;
+      window.open = function (url) {
+        window.parent.postMessage({
+          type: "openExternal",
+          href: url,
+        }, "*");
+      };
 
-        .eyebrow {
-            font-size: 10px;
-            letter-spacing: 0.4em;
-            text-transform: uppercase;
-            color: var(–teal);
-            opacity: 0.7;
-            margin-bottom: 14px;
-        }
+      window.addEventListener('error', (event) => {
+        window.parent.postMessage({ type: 'console', message: 'Uncaught Error: ' + event.message }, '*');
+      });
+    })();
+  </script>
 
-        h1 {
-            font-family: 'Cormorant Garamond', serif;
-            font-weight: 300;
-            font-style: italic;
-            font-size: clamp(2.4rem, 6vw, 3.6rem);
-            color: var(–white);
-            line-height: 1.1;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#04080f">
+  <meta name="description"
+    content="Binaural beats for brain reset. Delta, Theta, Alpha &amp; Gamma waves. Use headphones.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ResetWave">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <title>ResetWave — Neural Reset Through Sound</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@100;300&family=Cormorant+Garamond:ital,wght@0,300;1,300&display=swap');
 
-        h1 span {
-            color: var(–teal);
-        }
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-        .subtitle {
-            margin-top: 12px;
-            font-size: 11px;
-            letter-spacing: 0.25em;
-            text-transform: uppercase;
-            opacity: 0.45;
-        }
+    :root {
+      --bg: #04080f;
+      --teal: #00d4c8;
+      --blue: #0099ff;
+      --glow: #00f5ff;
+      --text: #a8ccd8;
+      --white: #e8f4f8;
+    }
 
-        .visualizer-wrap {
-            position: relative;
-            width: 100%;
-            display: flex;
-            justify-content: center;
-        }
+    html,
+    body {
+      height: 100%;
+    }
 
-        canvas {
-            width: 100%;
-            max-width: 640px;
-            height: 140px;
-            display: block;
-        }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Josefin Sans', sans-serif;
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
 
-        .glow-line {
-            position: absolute;
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 60%;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, var(–teal), transparent);
-            opacity: 0;
-            transition: opacity 0.6s;
-        }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% 60%, rgba(0, 153, 255, 0.06) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 30% at 30% 30%, rgba(0, 212, 200, 0.04) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 40% at 70% 70%, rgba(0, 80, 120, 0.05) 0%, transparent 60%);
+      pointer-events: none;
+    }
 
-        .playing .glow-line {
-            opacity: 0.6;
-        }
+    body::after {
+      content: '';
+      position: fixed;
+      inset: -50%;
+      width: 200%;
+      height: 200%;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+      opacity: 0.025;
+      pointer-events: none;
+      animation: grain 8s steps(10) infinite;
+    }
 
-        .freq-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            width: 100%;
-        }
+    @keyframes grain {
 
-        .freq-btn {
-            background: rgba(0, 153, 255, 0.04);
-            border: 1px solid rgba(0, 212, 200, 0.12);
-            color: var(–text);
-            font-family: 'Josefin Sans', sans-serif;
-            font-size: 11px;
-            letter-spacing: 0.15em;
-            text-transform: uppercase;
-            padding: 14px 8px 12px;
-            cursor: pointer;
-            transition: all 0.25s;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 6px;
-            position: relative;
-            overflow: hidden;
-        }
+      0%,
+      100% {
+        transform: translate(0, 0)
+      }
 
-        .freq-btn::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(135deg, rgba(0, 212, 200, 0.08), rgba(0, 153, 255, 0.04));
-            opacity: 0;
-            transition: opacity 0.25s;
-        }
+      10% {
+        transform: translate(-2%, -3%)
+      }
 
-        .freq-btn:hover::before,
-        .freq-btn.active::before {
-            opacity: 1;
-        }
+      20% {
+        transform: translate(3%, 1%)
+      }
 
-        .freq-btn:hover {
-            border-color: rgba(0, 212, 200, 0.35);
-            color: var(–white);
-        }
+      30% {
+        transform: translate(-1%, 4%)
+      }
 
-        .freq-btn.active {
-            border-color: var(–teal);
-            color: var(–glow);
-            box-shadow: 0 0 20px rgba(0, 212, 200, 0.1), inset 0 0 20px rgba(0, 212, 200, 0.04);
-        }
+      40% {
+        transform: translate(4%, -2%)
+      }
 
-        .freq-hz {
-            font-family: 'Cormorant Garamond', serif;
-            font-size: 20px;
-            font-weight: 300;
-            line-height: 1;
-            color: inherit;
-        }
+      50% {
+        transform: translate(-3%, 2%)
+      }
 
-        .freq-name {
-            font-size: 9px;
-            letter-spacing: 0.2em;
-            opacity: 0.65;
-        }
+      60% {
+        transform: translate(2%, -4%)
+      }
 
-        .controls {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 28px;
-            width: 100%;
-        }
+      70% {
+        transform: translate(-4%, 3%)
+      }
 
-        .play-wrap {
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
+      80% {
+        transform: translate(1%, -1%)
+      }
 
-        .play-btn {
-            width: 68px;
-            height: 68px;
-            border-radius: 50%;
-            border: 1px solid rgba(0, 212, 200, 0.3);
-            background: rgba(0, 212, 200, 0.05);
-            color: var(–teal);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.3s;
-            position: relative;
-            z-index: 1;
-        }
+      90% {
+        transform: translate(3%, 4%)
+      }
+    }
 
-        .play-btn::before {
-            content: '';
-            position: absolute;
-            inset: -8px;
-            border-radius: 50%;
-            border: 1px solid rgba(0, 212, 200, 0.08);
-            transition: all 0.3s;
-        }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 40px;
+      z-index: 1;
+      width: 100%;
+      max-width: 700px;
+      padding: 40px 24px;
+    }
 
-        .play-btn:hover {
-            border-color: var(–teal);
-            background: rgba(0, 212, 200, 0.1);
-            box-shadow: 0 0 30px rgba(0, 212, 200, 0.15);
-        }
+    .header {
+      text-align: center;
+    }
 
-        .play-btn.active {
-            border-color: var(–glow);
-            background: rgba(0, 245, 255, 0.08);
-            box-shadow: 0 0 40px rgba(0, 245, 255, 0.2);
-        }
+    .eyebrow {
+      font-size: 10px;
+      letter-spacing: 0.4em;
+      text-transform: uppercase;
+      color: var(--teal);
+      opacity: 0.7;
+      margin-bottom: 14px;
+    }
 
-        .ripples {
-            position: absolute;
-            display: none;
-        }
+    h1 {
+      font-family: 'Cormorant Garamond', serif;
+      font-weight: 300;
+      font-style: italic;
+      font-size: clamp(2.4rem, 6vw, 3.6rem);
+      color: var(--white);
+      line-height: 1.1;
+    }
 
-        .playing .ripples {
-            display: block;
-        }
+    h1 span {
+      color: var(--teal);
+    }
 
-        .ripple-ring {
-            position: absolute;
-            width: 68px;
-            height: 68px;
-            border-radius: 50%;
-            border: 1px solid rgba(0, 212, 200, 0.4);
-            animation: ripple 2.5s ease-out infinite;
-            pointer-events: none;
-            top: 0;
-            left: 0;
-        }
+    .subtitle {
+      margin-top: 12px;
+      font-size: 11px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      opacity: 0.45;
+    }
 
-        .ripple-ring:nth-child(2) {
-            animation-delay: 0.8s;
-        }
+    .visualizer-wrap {
+      position: relative;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+    }
 
-        .ripple-ring:nth-child(3) {
-            animation-delay: 1.6s;
-        }
+    canvas {
+      width: 100%;
+      max-width: 640px;
+      height: 140px;
+      display: block;
+    }
 
-        @keyframes ripple {
-            0% {
-                transform: scale(1);
-                opacity: 0.6;
-            }
+    .glow-line {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 60%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--teal), transparent);
+      opacity: 0;
+      transition: opacity 0.6s;
+    }
 
-            100% {
-                transform: scale(3);
-                opacity: 0;
-            }
-        }
+    .playing .glow-line {
+      opacity: 0.6;
+    }
 
-        .vol-row {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            width: 100%;
-            max-width: 320px;
-        }
+    .freq-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      width: 100%;
+    }
 
-        .vol-label {
-            font-size: 9px;
-            letter-spacing: 0.3em;
-            text-transform: uppercase;
-            opacity: 0.4;
-            white-space: nowrap;
-        }
+    .freq-btn {
+      background: rgba(0, 153, 255, 0.04);
+      border: 1px solid rgba(0, 212, 200, 0.12);
+      color: var(--text);
+      font-family: 'Josefin Sans', sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      padding: 14px 8px 12px;
+      cursor: pointer;
+      transition: all 0.25s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+      overflow: hidden;
+    }
 
-        input[type=range] {
-            -webkit-appearance: none;
-            width: 100%;
-            height: 2px;
-            background: rgba(0, 212, 200, 0.15);
-            outline: none;
-            border-radius: 2px;
-            cursor: pointer;
-        }
+    .freq-btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(0, 212, 200, 0.08), rgba(0, 153, 255, 0.04));
+      opacity: 0;
+      transition: opacity 0.25s;
+    }
 
-        input[type=range]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background: var(–teal);
-            box-shadow: 0 0 10px rgba(0, 212, 200, 0.5);
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
+    .freq-btn:hover::before,
+    .freq-btn.active::before {
+      opacity: 1;
+    }
 
-        input[type=range]::-webkit-slider-thumb:hover {
-            transform: scale(1.3);
-        }
+    .freq-btn:hover {
+      border-color: rgba(0, 212, 200, 0.35);
+      color: var(--white);
+    }
 
-        .timer-row {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
+    .freq-btn.active {
+      border-color: var(--teal);
+      color: var(--glow);
+      box-shadow: 0 0 20px rgba(0, 212, 200, 0.1), inset 0 0 20px rgba(0, 212, 200, 0.04);
+    }
 
-        .timer-btn {
-            background: rgba(0, 80, 120, 0.15);
-            border: 1px solid rgba(0, 212, 200, 0.1);
-            color: var(–text);
-            font-family: 'Josefin Sans', sans-serif;
-            font-size: 10px;
-            letter-spacing: 0.2em;
-            padding: 6px 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-transform: uppercase;
-        }
+    .freq-hz {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 20px;
+      font-weight: 300;
+      line-height: 1;
+      color: inherit;
+    }
 
-        .timer-btn:hover,
-        .timer-btn.sel {
-            border-color: rgba(0, 212, 200, 0.35);
-            color: var(–teal);
-        }
+    .freq-name {
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      opacity: 0.65;
+    }
 
-        .timer-btn.sel {
-            background: rgba(0, 212, 200, 0.06);
-        }
+    .controls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+      width: 100%;
+    }
 
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            border: 1px solid rgba(0, 212, 200, 0.15);
-            padding: 5px 14px;
-            font-size: 9px;
-            letter-spacing: 0.3em;
-            text-transform: uppercase;
-            color: rgba(0, 212, 200, 0.5);
-        }
+    .play-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
 
-        .badge-dot {
-            width: 5px;
-            height: 5px;
-            border-radius: 50%;
-            background: var(–teal);
-            opacity: 0.5;
-        }
+    .play-btn {
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 212, 200, 0.3);
+      background: rgba(0, 212, 200, 0.05);
+      color: var(--teal);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s;
+      position: relative;
+      z-index: 1;
+    }
 
-        .badge-dot.pulse {
-            animation: bpulse 2s ease-in-out infinite;
-            opacity: 1;
-        }
+    .play-btn::before {
+      content: '';
+      position: absolute;
+      inset: -8px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 212, 200, 0.08);
+      transition: all 0.3s;
+    }
 
-        @keyframes bpulse {
+    .play-btn:hover {
+      border-color: var(--teal);
+      background: rgba(0, 212, 200, 0.1);
+      box-shadow: 0 0 30px rgba(0, 212, 200, 0.15);
+    }
 
-            0%,
-            100% {
-                opacity: 0.3;
-                transform: scale(1);
-            }
+    .play-btn.active {
+      border-color: var(--glow);
+      background: rgba(0, 245, 255, 0.08);
+      box-shadow: 0 0 40px rgba(0, 245, 255, 0.2);
+    }
 
-            50% {
-                opacity: 1;
-                transform: scale(1.4);
-            }
-        }
+    .ripples {
+      position: absolute;
+      display: none;
+    }
 
-        .status {
-            font-size: 10px;
-            letter-spacing: 0.25em;
-            text-transform: uppercase;
-            opacity: 0;
-            color: var(–teal);
-            transition: opacity 0.5s;
-            text-align: center;
-        }
+    .playing .ripples {
+      display: block;
+    }
 
-        .status.show {
-            opacity: 0.55;
-        }
+    .ripple-ring {
+      position: absolute;
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 212, 200, 0.4);
+      animation: ripple 2.5s ease-out infinite;
+      pointer-events: none;
+      top: 0;
+      left: 0;
+    }
 
-        /* Background audio notice */
-        .bg-notice {
-            font-size: 9px;
-            letter-spacing: 0.2em;
-            text-transform: uppercase;
-            opacity: 0.3;
-            text-align: center;
-            margin-top: -20px;
-        }
+    .ripple-ring:nth-child(2) {
+      animation-delay: 0.8s;
+    }
 
-        /* PWA install banner */
-        #installBanner {
-            position: fixed;
-            bottom: 24px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 20, 35, 0.95);
-            border: 1px solid rgba(0, 212, 200, 0.2);
-            padding: 14px 20px;
-            display: none;
-            align-items: center;
-            gap: 14px;
-            font-size: 11px;
-            letter-spacing: 0.1em;
-            z-index: 100;
-            backdrop-filter: blur(10px);
-            white-space: nowrap;
-        }
+    .ripple-ring:nth-child(3) {
+      animation-delay: 1.6s;
+    }
 
-        #installBanner.show {
-            display: flex;
-        }
+    @keyframes ripple {
+      0% {
+        transform: scale(1);
+        opacity: 0.6;
+      }
 
-        #installBtn {
-            background: rgba(0, 212, 200, 0.1);
-            border: 1px solid rgba(0, 212, 200, 0.4);
-            color: var(–teal);
-            font-family: 'Josefin Sans', sans-serif;
-            font-size: 10px;
-            letter-spacing: 0.2em;
-            padding: 6px 14px;
-            cursor: pointer;
-            text-transform: uppercase;
-        }
+      100% {
+        transform: scale(3);
+        opacity: 0;
+      }
+    }
 
-        #dismissBtn {
-            background: none;
-            border: none;
-            color: rgba(255, 255, 255, 0.3);
-            cursor: pointer;
-            font-size: 16px;
-            line-height: 1;
-            padding: 0 4px;
-        }
-    </style>
+    .vol-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      width: 100%;
+      max-width: 320px;
+    }
 
+    .vol-label {
+      font-size: 9px;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      opacity: 0.4;
+      white-space: nowrap;
+    }
+
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 2px;
+      background: rgba(0, 212, 200, 0.15);
+      outline: none;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--teal);
+      box-shadow: 0 0 10px rgba(0, 212, 200, 0.5);
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+
+    input[type=range]::-webkit-slider-thumb:hover {
+      transform: scale(1.3);
+    }
+
+    .timer-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .timer-btn {
+      background: rgba(0, 80, 120, 0.15);
+      border: 1px solid rgba(0, 212, 200, 0.1);
+      color: var(--text);
+      font-family: 'Josefin Sans', sans-serif;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      padding: 6px 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-transform: uppercase;
+    }
+
+    .timer-btn:hover,
+    .timer-btn.sel {
+      border-color: rgba(0, 212, 200, 0.35);
+      color: var(--teal);
+    }
+
+    .timer-btn.sel {
+      background: rgba(0, 212, 200, 0.06);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid rgba(0, 212, 200, 0.15);
+      padding: 5px 14px;
+      font-size: 9px;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: rgba(0, 212, 200, 0.5);
+    }
+
+    .badge-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--teal);
+      opacity: 0.5;
+    }
+
+    .badge-dot.pulse {
+      animation: bpulse 2s ease-in-out infinite;
+      opacity: 1;
+    }
+
+    @keyframes bpulse {
+
+      0%,
+      100% {
+        opacity: 0.3;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: 1;
+        transform: scale(1.4);
+      }
+    }
+
+    .status {
+      font-size: 10px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      opacity: 0;
+      color: var(--teal);
+      transition: opacity 0.5s;
+      text-align: center;
+    }
+
+    .status.show {
+      opacity: 0.55;
+    }
+
+    /* Background audio notice */
+    .bg-notice {
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      opacity: 0.3;
+      text-align: center;
+      margin-top: -20px;
+    }
+
+    /* PWA install banner */
+    #installBanner {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 20, 35, 0.95);
+      border: 1px solid rgba(0, 212, 200, 0.2);
+      padding: 14px 20px;
+      display: none;
+      align-items: center;
+      gap: 14px;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+      white-space: nowrap;
+    }
+
+    #installBanner.show {
+      display: flex;
+    }
+
+    #installBtn {
+      background: rgba(0, 212, 200, 0.1);
+      border: 1px solid rgba(0, 212, 200, 0.4);
+      color: var(--teal);
+      font-family: 'Josefin Sans', sans-serif;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      padding: 6px 14px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+
+    #dismissBtn {
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.3);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0 4px;
+    }
+  </style>
 </head>
 
-<body>
+<body id="artifacts-component-root-html">
 
-    <div class="container">
-        <div class="header">
-            <div class="eyebrow">Neural Entrainment · Binaural Therapy</div>
-            <h1>Reset <span>the</span> Signal</h1>
-            <div class="subtitle">Use headphones for binaural effect</div>
-        </div>
-
-        <div class="visualizer-wrap" id="vizWrap">
-            <canvas id="waveCanvas"></canvas>
-            <div class="glow-line"></div>
-        </div>
-
-        <div class="freq-grid">
-            <button class="freq-btn" data-base="200" data-beat="4" data-label="Delta">
-                <span class="freq-hz">4 Hz</span>
-                <span class="freq-name">Delta</span>
-            </button>
-            <button class="freq-btn active" data-base="200" data-beat="8" data-label="Theta">
-                <span class="freq-hz">8 Hz</span>
-                <span class="freq-name">Theta</span>
-            </button>
-            <button class="freq-btn" data-base="200" data-beat="10" data-label="Alpha">
-                <span class="freq-hz">10 Hz</span>
-                <span class="freq-name">Alpha</span>
-            </button>
-            <button class="freq-btn" data-base="200" data-beat="40" data-label="Gamma">
-                <span class="freq-hz">40 Hz</span>
-                <span class="freq-name">Gamma</span>
-            </button>
-        </div>
-
-        <div class="controls">
-            <div class="play-wrap" id="playWrap">
-                <div class="ripples">
-                    <div class="ripple-ring"></div>
-                    <div class="ripple-ring"></div>
-                    <div class="ripple-ring"></div>
-                </div>
-                <button class="play-btn" id="playBtn">
-                    <svg id="playIcon" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                        <polygon points="6,4 20,12 6,20" />
-                    </svg>
-                </button>
-            </div>
-
-            ```
-            <div class="vol-row">
-                <span class="vol-label">Vol</span>
-                <input type="range" id="volSlider" min="0" max="1" step="0.01" value="0.35">
-                <span class="vol-label">Max</span>
-            </div>
-
-            <div class="timer-row">
-                <button class="timer-btn sel" data-min="0">∞</button>
-                <button class="timer-btn" data-min="5">5 min</button>
-                <button class="timer-btn" data-min="10">10 min</button>
-                <button class="timer-btn" data-min="20">20 min</button>
-            </div>
-
-            <div class="badge">
-                <div class="badge-dot" id="badgeDot"></div>
-                Binaural beats active
-            </div>
-
-            <div class="status" id="status">Awaiting signal</div>
-            <div class="bg-notice">Continues playing in background &amp; locked screen</div>
-            ```
-
-        </div>
+  <div class="container">
+    <div class="header">
+      <div class="eyebrow">Neural Entrainment · Binaural Therapy</div>
+      <h1>Reset <span>the</span> Signal</h1>
+      <div class="subtitle">Use headphones for binaural effect</div>
     </div>
 
-    <!-- PWA Install Banner -->
-
-    <div id="installBanner">
-        <span>Add to home screen for best experience</span>
-        <button id="installBtn">Install</button>
-        <button id="dismissBtn">✕</button>
+    <div class="visualizer-wrap" id="vizWrap">
+      <canvas id="waveCanvas" width="800" height="175"></canvas>
+      <div class="glow-line"></div>
     </div>
 
-    <script>
-        (function () {
-            // ── State ──────────────────────────────────────────────
-            let audioCtx = null, gainNode = null, leftOsc = null, rightOsc = null;
-            let playing = false;
-            let waveAmplitude = 0;
-            let phase = 0, beatPhase = 0;
-            let timerTimeout = null;
-            let baseFreq = 200, beatFreq = 8;
-            let volume = 0.35;
+    <div class="freq-grid">
+      <button class="freq-btn" data-base="200" data-beat="4" data-label="Delta">
+        <span class="freq-hz">4 Hz</span>
+        <span class="freq-name">Delta</span>
+      </button>
+      <button class="freq-btn active" data-base="200" data-beat="8" data-label="Theta">
+        <span class="freq-hz">8 Hz</span>
+        <span class="freq-name">Theta</span>
+      </button>
+      <button class="freq-btn" data-base="200" data-beat="10" data-label="Alpha">
+        <span class="freq-hz">10 Hz</span>
+        <span class="freq-name">Alpha</span>
+      </button>
+      <button class="freq-btn" data-base="200" data-beat="40" data-label="Gamma">
+        <span class="freq-hz">40 Hz</span>
+        <span class="freq-name">Gamma</span>
+      </button>
+    </div>
 
-            // ── Elements ───────────────────────────────────────────
-            const canvas = document.getElementById('waveCanvas');
-            const ctx2d = canvas.getContext('2d');
-            const playBtn = document.getElementById('playBtn');
-            const playIcon = document.getElementById('playIcon');
-            const volSlider = document.getElementById('volSlider');
-            const statusEl = document.getElementById('status');
-            const vizWrap = document.getElementById('vizWrap');
-            const badgeDot = document.getElementById('badgeDot');
+    <div class="controls">
+      <div class="play-wrap" id="playWrap">
+        <div class="ripples">
+          <div class="ripple-ring"></div>
+          <div class="ripple-ring"></div>
+          <div class="ripple-ring"></div>
+        </div>
+        <button class="play-btn" id="playBtn">
+          <svg id="playIcon" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="6,4 20,12 6,20"></polygon>
+          </svg>
+        </button>
+      </div>
 
-            // ── Canvas resize ──────────────────────────────────────
-            function resize() {
-                canvas.width = canvas.offsetWidth * devicePixelRatio;
-                canvas.height = canvas.offsetHeight * devicePixelRatio;
-            }
-            resize();
-            window.addEventListener('resize', resize);
+      <div class="vol-row">
+        <span class="vol-label">Vol</span>
+        <input type="range" id="volSlider" min="0" max="1" step="0.01" value="0.35">
+        <span class="vol-label">Max</span>
+      </div>
 
-            // ── Audio ──────────────────────────────────────────────
-            function startAudio() {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      <div class="timer-row">
+        <button class="timer-btn sel" data-min="0">∞</button>
+        <button class="timer-btn" data-min="5">5 min</button>
+        <button class="timer-btn" data-min="10">10 min</button>
+        <button class="timer-btn" data-min="20">20 min</button>
+      </div>
 
-                // Unlock on iOS by resuming on user gesture (already inside click)
-                if (audioCtx.state === 'suspended') audioCtx.resume();
+      <div class="badge">
+        <div class="badge-dot" id="badgeDot"></div>
+        Binaural beats active
+      </div>
 
-                gainNode = audioCtx.createGain();
-                gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
-                gainNode.connect(audioCtx.destination);
+      <div class="status" id="status">Awaiting signal</div>
+      <div class="bg-notice">Continues playing in background &amp; locked screen</div>
+    </div>
+  </div>
 
-                const merger = audioCtx.createChannelMerger(2);
-                merger.connect(gainNode);
+  <!-- PWA Install Banner -->
+  <div id="installBanner">
+    <span>Add to home screen for best experience</span>
+    <button id="installBtn">Install</button>
+    <button id="dismissBtn">✕</button>
+  </div>
 
-                leftOsc = audioCtx.createOscillator();
-                rightOsc = audioCtx.createOscillator();
-                leftOsc.type = rightOsc.type = 'sine';
-                leftOsc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
-                rightOsc.frequency.setValueAtTime(baseFreq + beatFreq, audioCtx.currentTime);
+  <script>
+    (function () {
+      // ── State ──────────────────────────────────────────────
+      let audioCtx = null, gainNode = null, leftOsc = null, rightOsc = null;
+      let playing = false;
+      let waveAmplitude = 0;
+      let phase = 0, beatPhase = 0;
+      let timerTimeout = null;
+      let baseFreq = 200, beatFreq = 8;
+      let volume = 0.35;
 
-                const lGain = audioCtx.createGain();
-                const rGain = audioCtx.createGain();
-                leftOsc.connect(lGain);
-                rightOsc.connect(rGain);
-                lGain.connect(merger, 0, 0);
-                rGain.connect(merger, 0, 1);
+      // ── Elements ───────────────────────────────────────────
+      const canvas = document.getElementById('waveCanvas');
+      const ctx2d = canvas.getContext('2d');
+      const playBtn = document.getElementById('playBtn');
+      const playIcon = document.getElementById('playIcon');
+      const volSlider = document.getElementById('volSlider');
+      const statusEl = document.getElementById('status');
+      const vizWrap = document.getElementById('vizWrap');
+      const badgeDot = document.getElementById('badgeDot');
 
-                leftOsc.start();
-                rightOsc.start();
+      // ── Canvas resize ──────────────────────────────────────
+      function resize() {
+        canvas.width = canvas.offsetWidth * devicePixelRatio;
+        canvas.height = canvas.offsetHeight * devicePixelRatio;
+      }
+      resize();
+      window.addEventListener('resize', resize);
 
-                setupMediaSession();
-            }
+      // ── Audio ──────────────────────────────────────────────
+      function startAudio() {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-            function stopAudio() {
-                [leftOsc, rightOsc].forEach(o => { try { o && o.stop(); } catch (e) { } });
-                leftOsc = rightOsc = null;
-                if (audioCtx) { audioCtx.close(); audioCtx = null; }
-                gainNode = null;
-                if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
-            }
+        // Unlock on iOS by resuming on user gesture (already inside click)
+        if (audioCtx.state === 'suspended') audioCtx.resume();
 
-            function updateFrequency() {
-                if (!audioCtx) return;
-                const t = audioCtx.currentTime;
-                leftOsc.frequency.setTargetAtTime(baseFreq, t, 0.05);
-                rightOsc.frequency.setTargetAtTime(baseFreq + beatFreq, t, 0.05);
-                setupMediaSession();
-            }
+        gainNode = audioCtx.createGain();
+        gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
+        gainNode.connect(audioCtx.destination);
 
-            // ── Media Session API (lock screen controls) ───────────
-            function setupMediaSession() {
-                if (!('mediaSession' in navigator)) return;
-                const activeBtn = document.querySelector('.freq-btn.active');
-                const label = activeBtn ? activeBtn.dataset.label : 'Theta';
-                const hz = activeBtn ? activeBtn.querySelector('.freq-hz').textContent : '8 Hz';
+        const merger = audioCtx.createChannelMerger(2);
+        merger.connect(gainNode);
 
-                navigator.mediaSession.metadata = new MediaMetadata({
-                    title: `${label} Waves — ${hz}`,
-                    artist: 'ResetWave',
-                    album: 'Neural Entrainment',
-                });
+        leftOsc = audioCtx.createOscillator();
+        rightOsc = audioCtx.createOscillator();
+        leftOsc.type = rightOsc.type = 'sine';
+        leftOsc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+        rightOsc.frequency.setValueAtTime(baseFreq + beatFreq, audioCtx.currentTime);
 
-                navigator.mediaSession.playbackState = 'playing';
+        const lGain = audioCtx.createGain();
+        const rGain = audioCtx.createGain();
+        leftOsc.connect(lGain);
+        rightOsc.connect(rGain);
+        lGain.connect(merger, 0, 0);
+        rGain.connect(merger, 0, 1);
 
-                navigator.mediaSession.setActionHandler('play', () => togglePlay());
-                navigator.mediaSession.setActionHandler('pause', () => togglePlay());
-                navigator.mediaSession.setActionHandler('stop', () => { if (playing) togglePlay(); });
-            }
+        leftOsc.start();
+        rightOsc.start();
 
-            // ── Play / Pause ───────────────────────────────────────
-            function togglePlay() {
-                playing = !playing;
-                if (playing) {
-                    startAudio();
-                    playBtn.classList.add('active');
-                    vizWrap.classList.add('playing');
-                    playIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
-                    badgeDot.classList.add('pulse');
-                    showStatus(getLabel());
-                    startTimer();
-                } else {
-                    stopAudio();
-                    playBtn.classList.remove('active');
-                    vizWrap.classList.remove('playing');
-                    playIcon.innerHTML = '<polygon points="6,4 20,12 6,20"/>';
-                    badgeDot.classList.remove('pulse');
-                    showStatus('Session paused');
-                    clearTimer();
-                }
-            }
+        setupMediaSession();
+      }
 
-            playBtn.addEventListener('click', togglePlay);
+      function stopAudio() {
+        [leftOsc, rightOsc].forEach(o => { try { o && o.stop(); } catch (e) { } });
+        leftOsc = rightOsc = null;
+        if (audioCtx) { audioCtx.close(); audioCtx = null; }
+        gainNode = null;
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
+      }
 
-            // Volume
-            volSlider.addEventListener('input', () => {
-                volume = parseFloat(volSlider.value);
-                if (gainNode) gainNode.gain.setTargetAtTime(volume, audioCtx.currentTime, 0.05);
-            });
+      function updateFrequency() {
+        if (!audioCtx) return;
+        const t = audioCtx.currentTime;
+        leftOsc.frequency.setTargetAtTime(baseFreq, t, 0.05);
+        rightOsc.frequency.setTargetAtTime(baseFreq + beatFreq, t, 0.05);
+        setupMediaSession();
+      }
 
-            // Frequency buttons
-            document.querySelectorAll('.freq-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.freq-btn').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    baseFreq = parseFloat(btn.dataset.base);
-                    beatFreq = parseFloat(btn.dataset.beat);
-                    updateFrequency();
-                    if (playing) showStatus(getLabel());
-                });
-            });
+      // ── Media Session API (lock screen controls) ───────────
+      function setupMediaSession() {
+        if (!('mediaSession' in navigator)) return;
+        const activeBtn = document.querySelector('.freq-btn.active');
+        const label = activeBtn ? activeBtn.dataset.label : 'Theta';
+        const hz = activeBtn ? activeBtn.querySelector('.freq-hz').textContent : '8 Hz';
 
-            // Timer buttons
-            document.querySelectorAll('.timer-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.timer-btn').forEach(b => b.classList.remove('sel'));
-                    btn.classList.add('sel');
-                    if (playing) { clearTimer(); startTimer(); }
-                });
-            });
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: `${label} Waves — ${hz}`,
+          artist: 'ResetWave',
+          album: 'Neural Entrainment',
+        });
 
-            function getLabel() {
-                const btn = document.querySelector('.freq-btn.active');
-                return btn ? `${btn.dataset.label} · ${btn.querySelector('.freq-hz').textContent} binaural` : '';
-            }
+        navigator.mediaSession.playbackState = 'playing';
 
-            function showStatus(msg) {
-                statusEl.textContent = msg;
-                statusEl.classList.add('show');
-            }
+        navigator.mediaSession.setActionHandler('play', () => togglePlay());
+        navigator.mediaSession.setActionHandler('pause', () => togglePlay());
+        navigator.mediaSession.setActionHandler('stop', () => { if (playing) togglePlay(); });
+      }
 
-            function startTimer() {
-                const sel = document.querySelector('.timer-btn.sel');
-                const mins = parseInt(sel.dataset.min);
-                if (!mins) return;
-                timerTimeout = setTimeout(() => {
-                    if (playing) togglePlay();
-                    showStatus('Session complete');
-                }, mins * 60 * 1000);
-            }
-
-            function clearTimer() {
-                if (timerTimeout) { clearTimeout(timerTimeout); timerTimeout = null; }
-            }
-
-            // ── Waveform visualizer ────────────────────────────────
-            (function drawLoop() {
-                const W = canvas.width, H = canvas.height;
-                ctx2d.clearRect(0, 0, W, H);
-
-                waveAmplitude += ((playing ? 1 : 0) - waveAmplitude) * 0.04;
-                phase += (baseFreq / 44100) * 4.5;
-                beatPhase += (beatFreq / 44100) * 4.5;
-
-                if (waveAmplitude < 0.002) {
-                    ctx2d.beginPath();
-                    ctx2d.moveTo(0, H / 2);
-                    ctx2d.lineTo(W, H / 2);
-                    ctx2d.strokeStyle = 'rgba(0,212,200,0.08)';
-                    ctx2d.lineWidth = 1;
-                    ctx2d.stroke();
-                } else {
-                    const amp = H * 0.36 * waveAmplitude;
-                    for (let w = 0; w < 3; w++) {
-                        const op = (1 - w * 0.28) * waveAmplitude;
-                        const fm = 1 + w * 0.5;
-                        const as = 1 - w * 0.25;
-                        const mod = 0.55 + 0.45 * Math.sin(beatPhase * fm * Math.PI * 2);
-                        const g = ctx2d.createLinearGradient(0, 0, W, 0);
-                        if (w === 0) {
-                            g.addColorStop(0, `rgba(0,212,200,0)`);
-                            g.addColorStop(0.3, `rgba(0,212,200,${op * 0.9})`);
-                            g.addColorStop(0.5, `rgba(0,245,255,${op})`);
-                            g.addColorStop(0.7, `rgba(0,153,255,${op * 0.9})`);
-                            g.addColorStop(1, `rgba(0,153,255,0)`);
-                        } else {
-                            g.addColorStop(0, `rgba(0,153,255,0)`);
-                            g.addColorStop(0.5, `rgba(0,153,255,${op * 0.4})`);
-                            g.addColorStop(1, `rgba(0,153,255,0)`);
-                        }
-                        ctx2d.beginPath();
-                        for (let x = 0; x <= W; x += 2) {
-                            const t = x / W;
-                            const y = H / 2 + amp * as * mod *
-                                Math.sin(t * Math.PI * 8 * fm + phase * Math.PI * 2 * fm) *
-                                Math.sin(t * Math.PI);
-                            x === 0 ? ctx2d.moveTo(x, y) : ctx2d.lineTo(x, y);
-                        }
-                        ctx2d.strokeStyle = g;
-                        ctx2d.lineWidth = w === 0 ? 2 / devicePixelRatio : 1.2 / devicePixelRatio;
-                        ctx2d.shadowColor = 'rgba(0,212,200,0.4)';
-                        ctx2d.shadowBlur = w === 0 ? 8 : 0;
-                        ctx2d.stroke();
-                        ctx2d.shadowBlur = 0;
-                    }
-                }
-                requestAnimationFrame(drawLoop);
-            })();
-
-            // ── PWA Install Prompt ─────────────────────────────────
-            let deferredPrompt = null;
-            const banner = document.getElementById('installBanner');
-            const installBtn = document.getElementById('installBtn');
-            const dismissBtn = document.getElementById('dismissBtn');
-
-            window.addEventListener('beforeinstallprompt', e => {
-                e.preventDefault();
-                deferredPrompt = e;
-                banner.classList.add('show');
-            });
-
-            installBtn.addEventListener('click', async () => {
-                if (!deferredPrompt) return;
-                deferredPrompt.prompt();
-                const { outcome } = await deferredPrompt.userChoice;
-                deferredPrompt = null;
-                banner.classList.remove('show');
-            });
-
-            dismissBtn.addEventListener('click', () => banner.classList.remove('show'));
-
-            // ── iOS audio unlock keepalive ─────────────────────────
-            // Prevents iOS from suspending AudioContext when screen locks
-            document.addEventListener('visibilitychange', () => {
-                if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-            });
-
-        })();
-    </script>
-
-    <!-- Service Worker registration -->
-
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js').catch(() => { });
-            });
+      // ── Play / Pause ───────────────────────────────────────
+      function togglePlay() {
+        playing = !playing;
+        if (playing) {
+          startAudio();
+          playBtn.classList.add('active');
+          vizWrap.classList.add('playing');
+          playIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+          badgeDot.classList.add('pulse');
+          showStatus(getLabel());
+          startTimer();
+        } else {
+          stopAudio();
+          playBtn.classList.remove('active');
+          vizWrap.classList.remove('playing');
+          playIcon.innerHTML = '<polygon points="6,4 20,12 6,20"/>';
+          badgeDot.classList.remove('pulse');
+          showStatus('Session paused');
+          clearTimer();
         }
-    </script>
+      }
+
+      playBtn.addEventListener('click', togglePlay);
+
+      // Volume
+      volSlider.addEventListener('input', () => {
+        volume = parseFloat(volSlider.value);
+        if (gainNode) gainNode.gain.setTargetAtTime(volume, audioCtx.currentTime, 0.05);
+      });
+
+      // Frequency buttons
+      document.querySelectorAll('.freq-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.freq-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          baseFreq = parseFloat(btn.dataset.base);
+          beatFreq = parseFloat(btn.dataset.beat);
+          updateFrequency();
+          if (playing) showStatus(getLabel());
+        });
+      });
+
+      // Timer buttons
+      document.querySelectorAll('.timer-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.timer-btn').forEach(b => b.classList.remove('sel'));
+          btn.classList.add('sel');
+          if (playing) { clearTimer(); startTimer(); }
+        });
+      });
+
+      function getLabel() {
+        const btn = document.querySelector('.freq-btn.active');
+        return btn ? `${btn.dataset.label} · ${btn.querySelector('.freq-hz').textContent} binaural` : '';
+      }
+
+      function showStatus(msg) {
+        statusEl.textContent = msg;
+        statusEl.classList.add('show');
+      }
+
+      function startTimer() {
+        const sel = document.querySelector('.timer-btn.sel');
+        const mins = parseInt(sel.dataset.min);
+        if (!mins) return;
+        timerTimeout = setTimeout(() => {
+          if (playing) togglePlay();
+          showStatus('Session complete');
+        }, mins * 60 * 1000);
+      }
+
+      function clearTimer() {
+        if (timerTimeout) { clearTimeout(timerTimeout); timerTimeout = null; }
+      }
+
+      // ── Waveform visualizer ────────────────────────────────
+      (function drawLoop() {
+        const W = canvas.width, H = canvas.height;
+        ctx2d.clearRect(0, 0, W, H);
+
+        waveAmplitude += ((playing ? 1 : 0) - waveAmplitude) * 0.04;
+        phase += (baseFreq / 44100) * 4.5;
+        beatPhase += (beatFreq / 44100) * 4.5;
+
+        if (waveAmplitude < 0.002) {
+          ctx2d.beginPath();
+          ctx2d.moveTo(0, H / 2);
+          ctx2d.lineTo(W, H / 2);
+          ctx2d.strokeStyle = 'rgba(0,212,200,0.08)';
+          ctx2d.lineWidth = 1;
+          ctx2d.stroke();
+        } else {
+          const amp = H * 0.36 * waveAmplitude;
+          for (let w = 0; w < 3; w++) {
+            const op = (1 - w * 0.28) * waveAmplitude;
+            const fm = 1 + w * 0.5;
+            const as = 1 - w * 0.25;
+            const mod = 0.55 + 0.45 * Math.sin(beatPhase * fm * Math.PI * 2);
+            const g = ctx2d.createLinearGradient(0, 0, W, 0);
+            if (w === 0) {
+              g.addColorStop(0, `rgba(0,212,200,0)`);
+              g.addColorStop(0.3, `rgba(0,212,200,${op * 0.9})`);
+              g.addColorStop(0.5, `rgba(0,245,255,${op})`);
+              g.addColorStop(0.7, `rgba(0,153,255,${op * 0.9})`);
+              g.addColorStop(1, `rgba(0,153,255,0)`);
+            } else {
+              g.addColorStop(0, `rgba(0,153,255,0)`);
+              g.addColorStop(0.5, `rgba(0,153,255,${op * 0.4})`);
+              g.addColorStop(1, `rgba(0,153,255,0)`);
+            }
+            ctx2d.beginPath();
+            for (let x = 0; x <= W; x += 2) {
+              const t = x / W;
+              const y = H / 2 + amp * as * mod *
+                Math.sin(t * Math.PI * 8 * fm + phase * Math.PI * 2 * fm) *
+                Math.sin(t * Math.PI);
+              x === 0 ? ctx2d.moveTo(x, y) : ctx2d.lineTo(x, y);
+            }
+            ctx2d.strokeStyle = g;
+            ctx2d.lineWidth = w === 0 ? 2 / devicePixelRatio : 1.2 / devicePixelRatio;
+            ctx2d.shadowColor = 'rgba(0,212,200,0.4)';
+            ctx2d.shadowBlur = w === 0 ? 8 : 0;
+            ctx2d.stroke();
+            ctx2d.shadowBlur = 0;
+          }
+        }
+        requestAnimationFrame(drawLoop);
+      })();
+
+      // ── PWA Install Prompt ─────────────────────────────────
+      let deferredPrompt = null;
+      const banner = document.getElementById('installBanner');
+      const installBtn = document.getElementById('installBtn');
+      const dismissBtn = document.getElementById('dismissBtn');
+
+      window.addEventListener('beforeinstallprompt', e => {
+        e.preventDefault();
+        deferredPrompt = e;
+        banner.classList.add('show');
+      });
+
+      installBtn.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        banner.classList.remove('show');
+      });
+
+      dismissBtn.addEventListener('click', () => banner.classList.remove('show'));
+
+      // ── iOS audio unlock keepalive ─────────────────────────
+      // Prevents iOS from suspending AudioContext when screen locks
+      document.addEventListener('visibilitychange', () => {
+        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      });
+
+    })();
+  </script>
+
+  <!-- Service Worker registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => { });
+      });
+    }
+  </script>
+
 
 </body>
 
