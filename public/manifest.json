@@ -1,0 +1,41 @@
+{
+  "name": "ResetWave — Neural Reset Through Sound",
+  "short_name": "ResetWave",
+  "description": "Binaural beats for brain reset. Delta, Theta, Alpha & Gamma waves.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#04080f",
+  "theme_color": "#04080f",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["health", "lifestyle", "music"],
+  "shortcuts": [
+    {
+      "name": "Theta Reset",
+      "short_name": "Theta",
+      "description": "Start Theta wave session",
+      "url": "/?mode=theta",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Alpha Focus",
+      "short_name": "Alpha",
+      "description": "Start Alpha wave session",
+      "url": "/?mode=alpha",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
