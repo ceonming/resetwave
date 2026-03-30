@@ -579,7 +579,7 @@
   <script>
     (function () {
       // ── State ──────────────────────────────────────────────
-      let audioCtx = null, gainNode = null, leftOsc = null, rightOsc = null, silentSource = null;
+      let audioCtx = null, gainNode = null, leftOsc = null, rightOsc = null;
       let playing = false;
       let waveAmplitude = 0;
       let phase = 0, beatPhase = 0;
@@ -605,39 +605,91 @@
       resize();
       window.addEventListener('resize', resize);
 
-      // ── Silent looping buffer — KEY fix for iOS background audio ──────
-      // iOS suspends AudioContext when the screen locks UNLESS there is an
-      // active BufferSource node continuously playing. A near-silent looping
-      // buffer keeps the context "alive" without any audible output.
-      function createSilentLoop(ctx) {
-        const frames = ctx.sampleRate * 2; // 2-second buffer
-        const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
-        const data = buf.getChannelData(0);
-        for (let i = 0; i < frames; i++) data[i] = Math.random() * 0.0001 - 0.00005;
-        const src = ctx.createBufferSource();
-        src.buffer = buf;
-        src.loop = true;
-        // Connect through a near-zero gain node — inaudible but keeps context busy
-        const zg = ctx.createGain();
-        zg.gain.value = 0.001;
-        src.connect(zg);
-        zg.connect(ctx.destination);
-        src.start(0);
-        return src;
-      }
+      // ── Hidden <audio> element — iOS background audio anchor ──────────
+      //
+      // iOS Safari suspends a pure Web Audio context when the screen locks.
+      // The fix: keep a real <audio> element playing at all times so iOS
+      // registers this page as an active media session.
+      //
+      // Architecture:
+      //   oscillators → merger → gainNode → audioCtx.destination  (real audio, stereo)
+      //                                   ↘
+      //                                    streamDest (MediaStream)
+      //                                        ↓
+      //                          silentGain(0) → streamDest  (carries the session anchor)
+      //                                        ↓
+      //                              silentAudio.srcObject     (tells iOS: media is playing)
+      //
+      // The binaural stereo path is ONLY through audioCtx.destination — never
+      // through the <audio> element, which would collapse it to mono.
+      // The <audio> element receives a dedicated near-zero-gain node so it
+      // carries a valid stream without affecting the audible output.
+
+      // Minimal valid WAV: 44-byte header + 1 byte of silence. Deterministic,
+      // no codec, parses correctly on all Safari versions unlike padded MP3s.
+      const SILENT_WAV = (function () {
+        const buf = new ArrayBuffer(46);
+        const v = new DataView(buf);
+        const s = (o, str) => [...str].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+        s(0, 'RIFF'); v.setUint32(4, 38, true);
+        s(8, 'WAVE');
+        s(12, 'fmt '); v.setUint32(16, 16, true);
+        v.setUint16(20, 1, true);  // PCM
+        v.setUint16(22, 1, true);  // mono
+        v.setUint32(24, 8000, true); // 8 kHz
+        v.setUint32(28, 8000, true); // byte rate
+        v.setUint16(32, 1, true);  // block align
+        v.setUint16(34, 8, true);  // bits per sample
+        s(36, 'data'); v.setUint32(40, 1, true);
+        v.setUint8(44, 128);       // one silent 8-bit sample
+        const bytes = new Uint8Array(buf);
+        let b64 = '';
+        bytes.forEach(b => b64 += String.fromCharCode(b));
+        return 'data:audio/wav;base64,' + btoa(b64);
+      })();
+
+      // Create the element but do NOT set src yet — setting src at module load
+      // triggers a fetch/decode before any user gesture, which can taint the
+      // element's autoplay state on iOS 17+. src is assigned in startAudio().
+      const silentAudio = document.createElement('audio');
+      silentAudio.loop = true;
+      // Do NOT use .muted — muted elements don't register as active playback on iOS.
+      // Use a GainNode at near-zero instead (handled in startAudio).
+      document.body.appendChild(silentAudio);
 
       // ── Audio ──────────────────────────────────────────────
       function startAudio() {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if (audioCtx.state === 'suspended') audioCtx.resume();
 
+        // Real audio path: merger → gainNode → speakers (stereo preserved)
         gainNode = audioCtx.createGain();
         gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
         gainNode.connect(audioCtx.destination);
 
-        // Start the silent keepalive loop immediately
-        silentSource = createSilentLoop(audioCtx);
+        // Session anchor path: near-zero gain → MediaStream → <audio> srcObject
+        // This is isolated from gainNode so volume control doesn't affect it,
+        // and the stereo merger output is never touched by this path.
+        const streamDest = audioCtx.createMediaStreamDestination();
+        const anchorGain = audioCtx.createGain();
+        anchorGain.gain.value = 0.00001; // inaudible, but non-zero so stream is "active"
+        anchorGain.connect(streamDest);
 
+        // Feed a looping silent buffer into the anchor gain to keep the stream live
+        const silentBuf = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
+        const anchorSrc = audioCtx.createBufferSource();
+        anchorSrc.buffer = silentBuf;
+        anchorSrc.loop = true;
+        anchorSrc.connect(anchorGain);
+        anchorSrc.start();
+
+        // Assign src first (required before srcObject on some iOS builds),
+        // then override with the live stream
+        silentAudio.src = SILENT_WAV;
+        silentAudio.srcObject = streamDest.stream;
+        silentAudio.play().catch(() => {});
+
+        // Binaural oscillator path (stereo, goes only to gainNode → destination)
         const merger = audioCtx.createChannelMerger(2);
         merger.connect(gainNode);
 
@@ -661,9 +713,15 @@
       }
 
       function stopAudio() {
+        // Stop oscillators first, then clean up the audio element, then close context.
+        // Order matters: closing context while srcObject is still live can cause
+        // a Safari error event that taints the element for the next session.
         [leftOsc, rightOsc].forEach(o => { try { o && o.stop(); } catch (e) { } });
-        try { silentSource && silentSource.stop(); } catch (e) { }
-        leftOsc = rightOsc = silentSource = null;
+        leftOsc = rightOsc = null;
+        silentAudio.pause();
+        silentAudio.srcObject = null;
+        silentAudio.removeAttribute('src');
+        silentAudio.load(); // reset element state cleanly
         if (audioCtx) { audioCtx.close(); audioCtx = null; }
         gainNode = null;
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
@@ -774,24 +832,19 @@
       }
 
       // ── iOS AudioContext keepalive ─────────────────────────
-      // Resume the context on any user interaction and on visibility change.
-      // Touch events are critical on iOS — the context can only be resumed
-      // inside a user gesture handler.
       function resumeCtx() {
         if (audioCtx && audioCtx.state === 'suspended') {
           audioCtx.resume().catch(() => {});
         }
+        if (playing && silentAudio.paused) {
+          silentAudio.play().catch(() => {});
+        }
       }
 
       document.addEventListener('touchstart', resumeCtx, { passive: true, capture: true });
-      document.addEventListener('touchend', resumeCtx, { passive: true, capture: true });
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') resumeCtx();
       });
-      document.addEventListener('focus', resumeCtx, true);
-
-      // Belt-and-suspenders heartbeat: polls every 2 s while playing
-      // in case iOS quietly suspends the context without firing any event.
       setInterval(() => { if (playing) resumeCtx(); }, 2000);
 
       // ── Waveform visualizer ────────────────────────────────
